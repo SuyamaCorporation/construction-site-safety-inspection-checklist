@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>建設現場安全点検チェックリスト</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .status-ok { accent-color: #22c55e; }
+    .status-ng { accent-color: #ef4444; }
+    .status-na { accent-color: #94a3b8; }
+    .tab-active { border-bottom: 3px solid #f59e0b; color: #d97706; font-weight: 600; }
+    #exportModal, #historyModal { backdrop-filter: blur(4px); }
+    .ng-row { background: #fff5f5; }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <div class="max-w-2xl mx-auto px-4 py-8">
+    <h1 class="text-2xl font-bold text-center text-gray-800 mb-1">🦺 建設現場安全点検チェックリスト</h1>
+    <p class="text-center text-gray-500 text-sm mb-6">日次安全点検・是正管理・月次集計レポート</p>
+
+    <!-- Date & Inspector -->
+    <div class="bg-white rounded-2xl shadow p-4 mb-5">
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">点検日</label>
+          <input type="date" id="inspectionDate"
+            class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">点検者名</label>
+          <input type="text" id="inspectorName" placeholder="山田 太郎" maxlength="20"
+            class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300">
+        </div>
+      </div>
+    </div>
+
+    <!-- Summary Bar -->
+    <div class="bg-white rounded-2xl shadow p-4 mb-5">
+      <div class="grid grid-cols-3 gap-3 text-center mb-3">
+        <div class="bg-green-50 rounded-xl p-2">
+          <div class="text-xl font-bold text-green-600" id="okCount">0</div>
+          <div class="text-xs text-gray-500">OK</div>
+        </div>
+        <div class="bg-red-50 rounded-xl p-2">
+          <div class="text-xl font-bold text-red-500" id="ngCount">0</div>
+          <div class="text-xs text-gray-500">NG（是正必要）</div>
+        </div>
+        <div class="bg-gray-50 rounded-xl p-2">
+          <div class="text-xl font-bold text-gray-400" id="naCount">0</div>
+          <div class="text-xs text-gray-500">N/A（対象外）</div>
+        </div>
+      </div>
+      <div class="flex gap-2">
+        <button onclick="saveSession()" class="flex-1 bg-amber-500 hover:bg-amber-600 text-white font-semibold py-2 rounded-lg text-sm">
+          保存する
+        </button>
+        <button onclick="showExport()" class="flex-1 bg-gray-700 hover:bg-gray-800 text-white font-semibold py-2 rounded-lg text-sm">
+          レポート出力
+        </button>
+        <button onclick="showHistory()" class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2 rounded-lg text-sm">
+          履歴
+        </button>
+      </div>
+    </div>
+
+    <!-- Checklist -->
+    <div id="checklistContent" class="space-y-5"></div>
+  </div>
+
+  <!-- Export Modal -->
+  <div id="exportModal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[85vh] flex flex-col">
+      <div class="flex justify-between items-center p-4 border-b">
+        <h2 class="font-semibold text-gray-800">点検レポート</h2>
+        <button onclick="closeExport()" class="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+      </div>
+      <div class="flex-1 overflow-auto p-4">
+        <pre id="exportText" class="text-xs text-gray-700 whitespace-pre-wrap font-mono bg-gray-50 p-3 rounded-lg"></pre>
+      </div>
+      <div class="p-4 border-t">
+        <button onclick="copyExport()" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-semibold py-2 rounded-lg text-sm">
+          クリップボードにコピー
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- History Modal -->
+  <div id="historyModal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[85vh] flex flex-col">
+      <div class="flex justify-between items-center p-4 border-b">
+        <h2 class="font-semibold text-gray-800">点検履歴・月次集計</h2>
+        <button onclick="closeHistory()" class="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+      </div>
+      <div class="flex-1 overflow-auto p-4" id="historyContent"></div>
+    </div>
+  </div>
+
+  <script>
+    const CATEGORIES = [
+      {
+        id: 'scaffold',
+        name: '足場・仮設工事',
+        emoji: '🏗',
+        items: [
+          '足場の組立・解体に有資格者が従事している',
+          '足場の手すりが設置されている（高さ85cm以上）',
+          '足場の幅が40cm以上確保されている',
+          '足場板のめくれ・破損がない',
+          '足場のジャッキベースが安定している',
+          '落下防止ネット・幕が設置されている',
+        ]
+      },
+      {
+        id: 'electrical',
+        name: '仮設電気設備',
+        emoji: '⚡',
+        items: [
+          '仮設電気の配線が整理されている',
+          '漏電遮断機が設置・動作確認済み',
+          '電線の露出・破損がない',
+          '仮設分電盤に鍵・カバーがある',
+          '接地（アース）が適切に施工されている',
+        ]
+      },
+      {
+        id: 'machinery',
+        name: '重機・車両',
+        emoji: '🚧',
+        items: [
+          '重機オペレーターが資格を保有している',
+          '重機の作業半径内に立入禁止区域が設定されている',
+          '作業開始前の日常点検が実施されている',
+          'バックホウ等の安全装置が正常に作動する',
+          '運行路と作業員の動線が分離されている',
+        ]
+      },
+      {
+        id: 'ppe',
+        name: '個人防護具（PPE）',
+        emoji: '🦺',
+        items: [
+          '全作業員がヘルメットを着用している',
+          '高所作業者が安全帯（ハーネス）を使用している',
+          '安全靴（鉄芯入り）を着用している',
+          '溶接作業者が遮光面・溶接手袋を着用している',
+          '粉塵発生箇所で防塵マスクが使用されている',
+        ]
+      },
+      {
+        id: 'signage',
+        name: '危険区域標識',
+        emoji: '⚠️',
+        items: [
+          '工事区域の外周が適切にバリケード・コーンで囲われている',
+          '立入禁止標識が明瞭に設置されている',
+          '落下物防止の看板・養生が設置されている',
+          '緊急連絡先・安全担当者の掲示がある',
+          '消火器の設置位置が明示されている',
+        ]
+      },
+      {
+        id: 'other',
+        name: 'その他',
+        emoji: '📋',
+        items: [
+          '作業前KY（危険予知）活動が実施された',
+          '現場代理人・安全担当者が常駐している',
+          '救急箱・AEDの設置・確認がされている',
+          '整理整頓・5Sが維持されている',
+          '天候・気温に応じた熱中症・転倒対策がある',
+        ]
+      }
+    ];
+
+    let checkState = {}; // { 'scaffold-0': { status: 'ok'|'ng'|'na', note: '' } }
+    let sessions = [];
+
+    function load() {
+      const today = new Date().toISOString().split('T')[0];
+      document.getElementById('inspectionDate').value = today;
+
+      const saved = localStorage.getItem('construction-safety-state');
+      if (saved) { try { checkState = JSON.parse(saved); } catch(e) {} }
+      const sess = localStorage.getItem('construction-safety-sessions');
+      if (sess) { try { sessions = JSON.parse(sess); } catch(e) {} }
+
+      renderChecklist();
+    }
+
+    function saveCurrentState() {
+      localStorage.setItem('construction-safety-state', JSON.stringify(checkState));
+      updateCounts();
+    }
+
+    function updateCounts() {
+      let ok = 0, ng = 0, na = 0;
+      Object.values(checkState).forEach(v => {
+        if (v.status === 'ok') ok++;
+        else if (v.status === 'ng') ng++;
+        else if (v.status === 'na') na++;
+      });
+      document.getElementById('okCount').textContent = ok;
+      document.getElementById('ngCount').textContent = ng;
+      document.getElementById('naCount').textContent = na;
+    }
+
+    function renderChecklist() {
+      const container = document.getElementById('checklistContent');
+      container.innerHTML = '';
+
+      CATEGORIES.forEach(cat => {
+        const section = document.createElement('div');
+        section.className = 'bg-white rounded-2xl shadow overflow-hidden';
+
+        const catHeader = document.createElement('div');
+        catHeader.className = 'flex items-center gap-2 px-4 py-3 bg-amber-50 border-b border-amber-100';
+
+        const catTitle = document.createElement('span');
+        catTitle.className = 'font-semibold text-gray-800 text-sm';
+        catTitle.textContent = cat.emoji + ' ' + cat.name;
+
+        catHeader.appendChild(catTitle);
+        section.appendChild(catHeader);
+
+        cat.items.forEach((item, ii) => {
+          const key = cat.id + '-' + ii;
+          const state = checkState[key] || { status: '', note: '' };
+
+          const row = document.createElement('div');
+          row.className = 'px-4 py-3 border-b border-gray-50 ' + (state.status === 'ng' ? 'bg-red-50' : '');
+          row.id = 'row-' + key;
+
+          const itemLabel = document.createElement('div');
+          itemLabel.className = 'text-sm text-gray-700 mb-2';
+          itemLabel.textContent = item;
+
+          const radioRow = document.createElement('div');
+          radioRow.className = 'flex gap-4 items-center';
+
+          ['ok', 'ng', 'na'].forEach(val => {
+            const label = document.createElement('label');
+            label.className = 'flex items-center gap-1.5 cursor-pointer';
+
+            const radio = document.createElement('input');
+            radio.type = 'radio';
+            radio.name = 'status-' + key;
+            radio.value = val;
+            radio.className = val === 'ok' ? 'status-ok' : val === 'ng' ? 'status-ng' : 'status-na';
+            if (state.status === val) radio.checked = true;
+
+            radio.addEventListener('change', function() {
+              if (!checkState[key]) checkState[key] = { status: '', note: '' };
+              checkState[key].status = val;
+              const rowEl = document.getElementById('row-' + key);
+              rowEl.className = 'px-4 py-3 border-b border-gray-50 ' + (val === 'ng' ? 'bg-red-50' : '');
+              const noteRow = document.getElementById('note-' + key);
+              noteRow.classList.toggle('hidden', val !== 'ng');
+              saveCurrentState();
+            });
+
+            const span = document.createElement('span');
+            span.className = 'text-sm ' + (val === 'ok' ? 'text-green-600' : val === 'ng' ? 'text-red-500' : 'text-gray-400');
+            span.textContent = val === 'ok' ? '✅ OK' : val === 'ng' ? '❌ NG' : '— N/A';
+
+            label.appendChild(radio);
+            label.appendChild(span);
+            radioRow.appendChild(label);
+          });
+
+          const noteRow = document.createElement('div');
+          noteRow.id = 'note-' + key;
+          noteRow.className = 'mt-2 ' + (state.status !== 'ng' ? 'hidden' : '');
+
+          const noteInput = document.createElement('textarea');
+          noteInput.rows = 2;
+          noteInput.placeholder = '是正内容・担当者・期限を記入';
+          noteInput.maxLength = 200;
+          noteInput.className = 'w-full border border-red-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-red-200';
+          noteInput.value = state.note || '';
+          noteInput.addEventListener('input', function() {
+            if (!checkState[key]) checkState[key] = { status: 'ng', note: '' };
+            checkState[key].note = this.value;
+            saveCurrentState();
+          });
+
+          noteRow.appendChild(noteInput);
+          row.appendChild(itemLabel);
+          row.appendChild(radioRow);
+          row.appendChild(noteRow);
+          section.appendChild(row);
+        });
+
+        container.appendChild(section);
+      });
+
+      updateCounts();
+    }
+
+    function saveSession() {
+      const date = document.getElementById('inspectionDate').value;
+      const inspector = document.getElementById('inspectorName').value.trim() || '未記入';
+
+      let ok = 0, ng = 0, na = 0;
+      Object.values(checkState).forEach(v => {
+        if (v.status === 'ok') ok++;
+        else if (v.status === 'ng') ng++;
+        else if (v.status === 'na') na++;
+      });
+
+      const existing = sessions.findIndex(s => s.date === date);
+      const session = { date, inspector, ok, ng, na, snapshot: JSON.parse(JSON.stringify(checkState)) };
+      if (existing >= 0) sessions[existing] = session;
+      else sessions.push(session);
+      sessions.sort((a, b) => b.date.localeCompare(a.date));
+
+      localStorage.setItem('construction-safety-sessions', JSON.stringify(sessions));
+
+      const btn = document.querySelector('button[onclick="saveSession()"]');
+      const orig = btn.textContent;
+      btn.textContent = '保存しました ✓';
+      btn.classList.add('bg-green-500');
+      setTimeout(() => { btn.textContent = orig; btn.classList.remove('bg-green-500'); }, 1500);
+    }
+
+    function showExport() {
+      const date = document.getElementById('inspectionDate').value;
+      const inspector = document.getElementById('inspectorName').value.trim() || '未記入';
+
+      const lines = [
+        '建設現場安全点検レポート',
+        '========================',
+        '点検日: ' + date,
+        '点検者: ' + inspector,
+        '',
+      ];
+
+      let totalOk = 0, totalNg = 0, totalNa = 0;
+
+      CATEGORIES.forEach(cat => {
+        lines.push('【' + cat.name + '】');
+        cat.items.forEach((item, ii) => {
+          const key = cat.id + '-' + ii;
+          const state = checkState[key] || { status: '', note: '' };
+          const mark = state.status === 'ok' ? '[OK]' : state.status === 'ng' ? '[NG]' : state.status === 'na' ? '[N/A]' : '[未]';
+          lines.push('  ' + mark + ' ' + item);
+          if (state.status === 'ng' && state.note) {
+            lines.push('       是正内容: ' + state.note);
+          }
+          if (state.status === 'ok') totalOk++;
+          else if (state.status === 'ng') totalNg++;
+          else if (state.status === 'na') totalNa++;
+        });
+        lines.push('');
+      });
+
+      lines.push('--------------------');
+      lines.push('集計: OK=' + totalOk + ' / NG=' + totalNg + ' / N/A=' + totalNa);
+      lines.push('是正率（NG件数）: ' + totalNg + '件');
+
+      document.getElementById('exportText').textContent = lines.join('\n');
+      document.getElementById('exportModal').classList.remove('hidden');
+    }
+
+    function closeExport() {
+      document.getElementById('exportModal').classList.add('hidden');
+    }
+
+    function copyExport() {
+      const text = document.getElementById('exportText').textContent;
+      navigator.clipboard.writeText(text).then(() => {
+        const btn = document.querySelector('#exportModal .p-4.border-t button');
+        const orig = btn.textContent;
+        btn.textContent = 'コピーしました！';
+        setTimeout(() => { btn.textContent = orig; }, 1500);
+      });
+    }
+
+    function showHistory() {
+      const container = document.getElementById('historyContent');
+      container.innerHTML = '';
+
+      if (sessions.length === 0) {
+        const empty = document.createElement('p');
+        empty.className = 'text-sm text-gray-400 text-center py-4';
+        empty.textContent = '保存済みの点検記録がありません';
+        container.appendChild(empty);
+        document.getElementById('historyModal').classList.remove('hidden');
+        return;
+      }
+
+      // Monthly aggregation
+      const months = {};
+      sessions.forEach(s => {
+        const month = s.date.slice(0, 7);
+        if (!months[month]) months[month] = { ok: 0, ng: 0, na: 0, count: 0 };
+        months[month].ok += s.ok;
+        months[month].ng += s.ng;
+        months[month].na += s.na;
+        months[month].count++;
+      });
+
+      const monthHeader = document.createElement('h3');
+      monthHeader.className = 'font-semibold text-gray-700 text-sm mb-3';
+      monthHeader.textContent = '月次集計';
+      container.appendChild(monthHeader);
+
+      Object.entries(months).sort((a, b) => b[0].localeCompare(a[0])).forEach(([month, m]) => {
+        const row = document.createElement('div');
+        row.className = 'bg-amber-50 rounded-xl p-3 mb-2';
+
+        const title = document.createElement('div');
+        title.className = 'font-medium text-sm text-gray-700 mb-1';
+        title.textContent = month + '（' + m.count + '回実施）';
+
+        const stats = document.createElement('div');
+        stats.className = 'flex gap-3 text-xs';
+
+        const ok = document.createElement('span');
+        ok.className = 'text-green-600';
+        ok.textContent = 'OK: ' + m.ok;
+
+        const ng = document.createElement('span');
+        ng.className = 'text-red-500';
+        ng.textContent = 'NG: ' + m.ng;
+
+        const na = document.createElement('span');
+        na.className = 'text-gray-400';
+        na.textContent = 'N/A: ' + m.na;
+
+        stats.appendChild(ok);
+        stats.appendChild(ng);
+        stats.appendChild(na);
+        row.appendChild(title);
+        row.appendChild(stats);
+        container.appendChild(row);
+      });
+
+      const sessHeader = document.createElement('h3');
+      sessHeader.className = 'font-semibold text-gray-700 text-sm mt-4 mb-3';
+      sessHeader.textContent = '点検履歴';
+      container.appendChild(sessHeader);
+
+      sessions.slice(0, 20).forEach(s => {
+        const row = document.createElement('div');
+        row.className = 'flex items-center justify-between py-2 border-b border-gray-100 text-sm';
+
+        const left = document.createElement('div');
+        const dateEl = document.createElement('span');
+        dateEl.className = 'text-gray-700';
+        dateEl.textContent = s.date;
+        const insp = document.createElement('span');
+        insp.className = 'text-xs text-gray-400 ml-2';
+        insp.textContent = s.inspector;
+        left.appendChild(dateEl);
+        left.appendChild(insp);
+
+        const right = document.createElement('div');
+        right.className = 'flex gap-2 text-xs';
+
+        const ok = document.createElement('span');
+        ok.className = 'text-green-600';
+        ok.textContent = 'OK:' + s.ok;
+
+        const ng = document.createElement('span');
+        ng.className = 'text-red-500 font-semibold';
+        ng.textContent = 'NG:' + s.ng;
+
+        right.appendChild(ok);
+        right.appendChild(ng);
+        row.appendChild(left);
+        row.appendChild(right);
+        container.appendChild(row);
+      });
+
+      document.getElementById('historyModal').classList.remove('hidden');
+    }
+
+    function closeHistory() {
+      document.getElementById('historyModal').classList.add('hidden');
+    }
+
+    load();
+  </script>
+</body>
+</html>
